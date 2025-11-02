@@ -24,10 +24,11 @@ To use this script, you first need the [Templater](https://silentvoid.github.io/
 ---
 
 ## List of Templater scripts in this repo: 
-```
+
 Scripts/
-│ ├── Task - New & Convert
-```
+
+├─ [Task - New & Convert](https://github.com/fikte/Obsidian-Templater-Scripts/tree/main?tab=readme-ov-file#task---new--convert)
+
 
 
 ## Task - New & Convert
