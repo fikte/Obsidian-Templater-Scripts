@@ -1,0 +1,189 @@
+<%*
+const editor = app.workspace.activeLeaf.view.editor;
+if (!editor) {
+    new Notice("No active editor found.");
+    return "";
+}
+
+// --- CONFIGURATION ---
+const LAST_TAG_KEY = 'templater-task-last-tag'; // Define a key for localStorage
+const taskTypes = [
+    { display: "1. - [ ] to-do", value: "- [ ]" },
+    { display: "2. - [/] In Progress", value: "- [/]" },
+    { display: "3. - [-] Cancelled", value: "- [-]" },
+    { display: "4. - [/] incomplete", value: "- [/]" },
+    { display: "5. - [-] canceled", value: "- [-]" },
+    { display: "6. - [>] forwarded", value: "- [>]" },
+    { display: "7. - [<] scheduling", value: "- [<]" },
+    { display: "8. - [?] question", value: "- [?]" },
+    { display: "9. - [!] important", value: "- [!]" },
+    { display: "10. - [*] star", value: "- [*]" },
+    { display: "11. - [\"] quote", value: "- [\"]" },
+    { display: "12. - [l] location", value: "- [l]" },
+    { display: "13. - [b] bookmark", value: "- [b]" },
+    { display: "14. - [i] information", value: "- [i]" },
+    { display: "15. - [S] savings", value: "- [S]" },
+    { display: "16. - [I] idea", value: "- [I]" },
+    { display: "17. - [p] pros", value: "- [p]" },
+    { display: "18. - [c] cons", value: "- [c]" },
+    { display: "19. - [f] fire", value: "- [f]" },
+    { display: "20. - [k] key", value: "- [k]" },
+    { display: "21. - [w] win", value: "- [w]" },
+    { display: "22. - [u] up", value: "- [u]" },
+    { display: "23. - [d] down", value: "- [d]" }
+];
+const tags = ["#Example1", "#Example2", "#Example3", "Other"];
+
+// --- PARSING LOGIC ---
+const cursor = editor.getCursor();
+const originalLine = editor.getLine(cursor.line);
+let lineContent = originalLine.trim();
+let currentTaskValue = null;
+let currentDate = null;
+
+// Determine if we're creating a new task (i.e., the line is currently empty)
+const isNewTask = lineContent === "";
+
+for (const task of taskTypes) {
+    if (lineContent.startsWith(task.value)) {
+        currentTaskValue = task.value;
+        lineContent = lineContent.substring(task.value.length).trim();
+        break;
+    }
+}
+
+const dateRegex = /\uD83D\uDCC5\s*(\d{4}-\d{2}-\d{2})/; // Unicode for 📅
+const dateMatch = lineContent.match(dateRegex);
+if (dateMatch) {
+    currentDate = moment(dateMatch[1], "YYYY-MM-DD");
+    lineContent = lineContent.replace(dateRegex, '').trim();
+}
+
+// --- SCRIPT PROMPTS ---
+
+// 1. REORDER AND SELECT TASK TYPE
+let orderedTaskTypes = [...taskTypes];
+if (currentTaskValue) {
+    const currentIndex = orderedTaskTypes.findIndex(t => t.value === currentTaskValue);
+    if (currentIndex > -1) {
+        orderedTaskTypes.unshift(orderedTaskTypes.splice(currentIndex, 1)[0]);
+    }
+}
+const selectedTask = await tp.system.suggester(orderedTaskTypes.map(t => t.display), orderedTaskTypes.map(t => t.value));
+if (!selectedTask) return "";
+
+// 2. MULTI-TAG MANAGEMENT LOOP
+const tagRegex = /#([a-zA-Z0-9_\-]+)/g;
+let existingTags = lineContent.match(tagRegex) || [];
+lineContent = lineContent.replace(tagRegex, "").trim().replace(/\s\s+/g, ' '); // Remove all tags and extra spaces
+
+// === MODIFICATION: If it's a new task, load the last used tag ===
+if (isNewTask) {
+    const lastUsedTag = localStorage.getItem(LAST_TAG_KEY);
+    if (lastUsedTag) {
+        existingTags.push(lastUsedTag);
+    }
+}
+// === END MODIFICATION ===
+
+while (true) {
+    const tagStatus = existingTags.length > 0 ? existingTags.join(' ') : 'None';
+    const action = await tp.system.suggester(
+        [`▶ Continue to Date (Tags: ${tagStatus})`, "＋ Add a Tag", "－ Remove a Tag"],
+        ["continue", "add", "remove"]
+    );
+
+    if (!action || action === "continue") {
+        break;
+    }
+
+    if (action === "add") {
+        let chosenTag = await tp.system.suggester(tags, tags);
+        if (chosenTag === "Other") {
+            chosenTag = await tp.system.prompt("Enter new tag name:", "#");
+        }
+        if (chosenTag) {
+            const newTag = chosenTag.startsWith('#') ? chosenTag : '#' + chosenTag;
+            if (!existingTags.includes(newTag)) {
+                existingTags.push(newTag);
+                // === MODIFICATION: Save the newly added tag to localStorage ===
+                localStorage.setItem(LAST_TAG_KEY, newTag);
+                // === END MODIFICATION ===
+            }
+        }
+    } else if (action === "remove") {
+        if (existingTags.length === 0) {
+            new Notice("No tags to remove.");
+            continue;
+        }
+        const tagToRemove = await tp.system.suggester(existingTags, existingTags);
+        if (tagToRemove) {
+            existingTags = existingTags.filter(t => t !== tagToRemove);
+        }
+    }
+}
+
+// 3. REORDER AND SELECT DATE
+const dateFormat = "ddd DD MMM YYYY";
+const suggestions = new Map();
+// Build suggestions map...
+if (moment().day() > 0 && moment().day() < 6) {
+    for (let i = 0; i <= (5 - moment().day()); i++) { suggestions.set(i === 0 ? "Today" : (i === 1 ? "Tomorrow" : moment().add(i, 'days').format('dddd')), moment().add(i, 'days')); }
+    for (let i = 1; i < 6; i++) { suggestions.set(">> " + moment().day(i).format('dddd'), moment().add(1, 'weeks').day(i)); }
+} else {
+    for (let i = 1; i < 6; i++) { suggestions.set(">> " + moment().day(i).format('dddd'), moment().add(1, 'weeks').day(i)); }
+}
+suggestions.set("Manual", "MANUAL_OPTION");
+suggestions.set("No Date", "NO_DATE_OPTION");
+
+let orderedDateSuggestions = [...suggestions];
+if (currentDate && currentDate.isValid()) {
+    const currentIndex = orderedDateSuggestions.findIndex(([key, val]) => val instanceof moment && val.isSame(currentDate, 'day'));
+    if (currentIndex > -1) {
+        orderedDateSuggestions.unshift(orderedDateSuggestions.splice(currentIndex, 1)[0]);
+    } else {
+        orderedDateSuggestions.unshift([`[Current] ${currentDate.format(dateFormat)}`, currentDate]);
+    }
+}
+const dateLabels = orderedDateSuggestions.map(([k, v]) => (v instanceof moment) ? `${k} (${v.format("DD MMM YYYY")})` : k);
+const dateValues = orderedDateSuggestions.map(([k, v]) => v);
+
+const selection = await tp.system.suggester(dateLabels, dateValues);
+if (!selection) return "";
+
+let dateString = "";
+if (selection instanceof moment) {
+    dateString = ` \uD83D\uDCC5 ${selection.format("YYYY-MM-DD")}`;
+} else if (selection === "MANUAL_OPTION") {
+    const promptDate = (currentDate && currentDate.isValid()) ? currentDate.format("DD MM YY") : moment().format("DD MM YY");
+    const inputDate = await tp.system.prompt("Type a date (DD MM? YY?):", promptDate);
+    if (inputDate) {
+        const resultDate = moment(inputDate, "DD MM YY");
+        if (resultDate.isValid()) {
+            dateString = ` \uD83D\uDCC5 ${resultDate.format("YYYY-MM-DD")}`;
+        }
+    }
+}
+
+// --- FINAL ASSEMBLY AND CURSOR PLACEMENT ---
+const prefixPart = `${selectedTask} `;
+const tagPart = existingTags.length > 0 ? `${existingTags.join(' ')} ` : '';
+
+// If it's a new task, lineContent is empty. Otherwise, keep it.
+const finalContent = isNewTask ? '' : lineContent.trim();
+const newLine = `${prefixPart}${tagPart}${finalContent}${dateString}`;
+
+editor.replaceRange(newLine, { line: cursor.line, ch: 0 }, { line: cursor.line, ch: originalLine.length });
+
+// Set cursor position
+if (isNewTask) {
+    // Position after prefix and tags for typing
+    const cursorPosition = prefixPart.length + tagPart.length;
+    editor.setCursor({ line: cursor.line, ch: cursorPosition });
+} else {
+    // Position at the end of the converted line
+    editor.setCursor({ line: cursor.line, ch: newLine.length });
+}
+
+return "";
+%>
