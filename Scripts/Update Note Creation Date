@@ -1,0 +1,52 @@
+<%*
+// See repo reeadme for setup instructions
+
+const activeFile = app.workspace.getActiveFile();
+if (!activeFile) {
+    alert("❌ No active file! Click inside an editor pane and try again.");
+    return;
+}
+
+const filePath = app.vault.adapter.getFullPath(activeFile.path);
+const defaultDate = moment(activeFile.stat.ctime).format("DD/MM/YYYY HH:mm");
+
+const userInput = await tp.system.prompt(
+    "Enter new date & time (DD/MM/YYYY HH:mm)",
+    defaultDate
+);
+if (!userInput) return;
+
+const newDate = moment(userInput, "DD/MM/YYYY HH:mm", true);
+if (!newDate.isValid()) {
+    alert("❌ Invalid date format.");
+    return;
+}
+const formattedDate = newDate.format("MM/DD/YYYY HH:mm:ss");
+
+// The arguments are passed as an array of string
+const args = [formattedDate, filePath];
+const commandString = `set-date.sh '${formattedDate}' '${filePath}'`;
+
+const confirmationMessage = `The following script will be executed:\n\n${commandString}\n\nProceed?`;
+
+if (confirm(confirmationMessage)) {
+    try {
+        // We call the user function with our arguments.
+		await tp.user.setfile({date: formattedDate, filepath: filePath});        
+        // Force Obsidian to recognize the file change
+        const file = app.workspace.getActiveFile();
+        if (file) {
+            // Read and immediately write back to trigger cache update
+            const content = await app.vault.read(file);
+            await app.vault.modify(file, content);
+            
+            new Notice("✅ File date updated successfully", 3000);
+        }
+    } catch (e) {
+        console.error("Execution Error:", e);
+        alert(`❌ FAILED TO EXECUTE.\n\nError:\n${e.message}\n\nCheck system permissions and the script path in Templater settings.`);
+    }
+} else {
+    new Notice("Cancelled.", 3000);
+}
+%>
