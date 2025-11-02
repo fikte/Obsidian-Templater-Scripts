@@ -32,7 +32,7 @@ const taskTypes = [
     { display: "22. - [u] up", value: "- [u]" },
     { display: "23. - [d] down", value: "- [d]" }
 ];
-const tags = ["#Example1", "#Example2", "#Example3", "Other"];
+const tags = ["#Project-A", "#Work", "#Personal", "#Errands", "Other"];
 
 // --- PARSING LOGIC ---
 const cursor = editor.getCursor();
