@@ -40,8 +40,13 @@ The script is intelligent: it remembers your last-used tagon your device, pre-se
 
 ### ✨ Features
 
-*   **Interactive Workflow**: Uses pop-up menus to guide you through creating or editing a task.
+*   **Works with the Emoji or Dataview formats from the Tasks plugin**
+*   **Interactive Workflow**: Uses pop-up menus to guide you through creating or editing a task. 
 *   **Comprehensive Task Types**: Comes with 23 pre-configured task statuses, including to-do, in-progress, cancelled, important, idea, and more.
+*   **Set alerts times (works with my Calendar Period Week Notes plugin)**:
+    * Select and alert date time from a list of up to two weeks before the due date, or enter the alert date / time manually
+*   **Choose and easily set the tag priority**:
+    *   Chosoe the priotiy to set your task.      
 *   **Advanced Tag Management**:
     *   Interactively add or remove multiple tags.
     *   Remembers the last tag you used and automatically applies it to new tasks.
