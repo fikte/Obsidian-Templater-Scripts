@@ -1,12 +1,26 @@
 <%*
+// --- SCRIPT CONFIGURATION ---
+// This script requires Templater. See Readme for details.
+// Set to TRUE for Dataview format [key:: value], FALSE for Emoji format 📅 
+const USE_DATAVIEW_FORMAT = false; 
+
+// Used to display the last tag selected - makes navigating through faster
+const LAST_TAG_KEY = 'templater-task-last-tag'; 
+
+// Default time for alerts (HH:mm format) - This applies to future dates
+const DEFAULT_ALERT_TIME = "09:00";
+
+//Set the tags to choose from. Always keep other at the end to enable manual entry of a tag
+const tags = ["#Personal", "#Work", "#Meeting", "Other"];
+
+// --- No need to change anything past this point ---
+
 const editor = app.workspace.activeLeaf.view.editor;
 if (!editor) {
     new Notice("No active editor found.");
     return "";
 }
 
-// --- CONFIGURATION ---
-const LAST_TAG_KEY = 'templater-task-last-tag';
 const taskTypes = [
     { display: "1. - [ ] to-do", value: "- [ ]" },
     { display: "2. - [/] In Progress", value: "- [/]" },
@@ -27,22 +41,27 @@ const taskTypes = [
     { display: "17. - [p] pros", value: "- [p]" },
     { display: "18. - [c] cons", value: "- [c]" },
     { display: "19. - [f] fire", value: "- [f]" },
-    { display: "20. - [k] key", value: "- [k]" },
-    { display: "21. - [w] win", value: "- [w]" },
-    { display: "22. - [u] up", value: "- [u]" },
-    { display: "23. - [d] down", value: "- [d]" }
 ];
-const tags = ["#Project-A", "#Work", "#Personal", "#Errands", "Other"];
+
+// --- PRIORITY DEFINITIONS ---
+const priorityLevels = [
+    { display: "Highest (🔺)", emoji: '🔺', dv: 'highest' },
+    { display: "High (⏫)", emoji: '⏫', dv: 'high' },
+    { display: "Medium (🔼)", emoji: '🔼', dv: 'medium' },
+    { display: "Low (🔽)", emoji: '🔽', dv: 'low' },
+    { display: "Lowest (⏬)", emoji: '⏬', dv: 'lowest' },
+    { display: "No Priority", emoji: '', dv: null }
+];
 
 // --- PARSING LOGIC ---
 const cursor = editor.getCursor();
 const originalLine = editor.getLine(cursor.line);
 let lineContent = originalLine.trim();
 let currentTaskValue = null;
-let currentDate = null;
 
 const isNewTask = lineContent === "";
 
+// Extract leading task marker if present
 for (const task of taskTypes) {
     if (lineContent.startsWith(task.value)) {
         currentTaskValue = task.value;
@@ -51,11 +70,77 @@ for (const task of taskTypes) {
     }
 }
 
-const dateRegex = /\uD83D\uDCC5\s*(\d{4}-\d{2}-\d{2})/;
-const dateMatch = lineContent.match(dateRegex);
-if (dateMatch) {
-    currentDate = moment(dateMatch[1], "YYYY-MM-DD");
-    lineContent = lineContent.replace(dateRegex, '').trim();
+// --- REGEX DEFINITIONS (Match BOTH formats for parsing) ---
+// Emoji Regexes
+const dueEmojiRegex = /\uD83D\uDCC5\s*(\d{4}-\d{2}-\d{2})/;     // 📅 YYYY-MM-DD
+const createdEmojiRegex = /\u2795\s*(\d{4}-\d{2}-\d{2})/;       // ➕ YYYY-MM-DD
+const alertEmojiRegex = /⏰\s*(\d{4}-\d{2}-\d{2})\s+(\d{1,2}:\d{2})/; // ⏰ YYYY-MM-DD HH:mm
+const priorityEmojiRegex = /(🔺|⏫|🔼|🔽|⏬)/;
+
+// Dataview Regexes
+const dueDvRegex = /\[due::\s*(\d{4}-\d{2}-\d{2})\]/;
+const createdDvRegex = /\[created::\s*(\d{4}-\d{2}-\d{2})\]/;
+const alertDvRegex = /\[alert::\s*(\d{4}-\d{2}-\d{2})\s+(\d{1,2}:\d{2})\]/;
+const priorityDvRegex = /\[priority::\s*(highest|high|medium|low|lowest)\]/i;
+
+// --- CAPTURE & STRIP EXISTING DATA ---
+
+// 1. PRIORITY Parsing
+let currentPriorityValue = null;
+let priorityMatch = lineContent.match(priorityDvRegex);
+if (priorityMatch) {
+    currentPriorityValue = priorityMatch[1].toLowerCase();
+    lineContent = lineContent.replace(priorityDvRegex, '').trim();
+} else {
+    priorityMatch = lineContent.match(priorityEmojiRegex);
+    if (priorityMatch) {
+        const emoji = priorityMatch[1];
+        const level = priorityLevels.find(p => p.emoji === emoji);
+        if (level) currentPriorityValue = level.dv;
+        lineContent = lineContent.replace(priorityEmojiRegex, '').trim();
+    }
+}
+
+// 2. ALERT Parsing
+let alertDateTimeString = null;
+let alertMatch = lineContent.match(alertDvRegex);
+if (alertMatch) {
+    alertDateTimeString = { date: alertMatch[1], time: alertMatch[2] };
+    lineContent = lineContent.replace(alertDvRegex, '').trim();
+} else {
+    alertMatch = lineContent.match(alertEmojiRegex);
+    if (alertMatch) {
+        alertDateTimeString = { date: alertMatch[1], time: alertMatch[2] };
+        lineContent = lineContent.replace(alertEmojiRegex, '').trim();
+    }
+}
+
+// 3. CREATED DATE Parsing
+let createdDateString = null;
+let createdMatch = lineContent.match(createdDvRegex);
+if (createdMatch) {
+    createdDateString = createdMatch[1];
+    lineContent = lineContent.replace(createdDvRegex, '').trim();
+} else {
+    createdMatch = lineContent.match(createdEmojiRegex);
+    if (createdMatch) {
+        createdDateString = createdMatch[1];
+        lineContent = lineContent.replace(createdEmojiRegex, '').trim();
+    }
+}
+
+// 4. DUE DATE Parsing
+let dueDateString = null;
+let dueMatch = lineContent.match(dueDvRegex);
+if (dueMatch) {
+    dueDateString = dueMatch[1];
+    lineContent = lineContent.replace(dueDvRegex, '').trim();
+} else {
+    dueMatch = lineContent.match(dueEmojiRegex);
+    if (dueMatch) {
+        dueDateString = dueMatch[1];
+        lineContent = lineContent.replace(dueEmojiRegex, '').trim();
+    }
 }
 
 // --- SCRIPT PROMPTS ---
@@ -85,26 +170,20 @@ if (isNewTask || existingTags.length === 0) {
 
 while (true) {
     const tagStatus = existingTags.length > 0 ? existingTags.join(' ') : 'None';
-    
-    const actionPrompts = [`▶ Continue to Date (Tags: ${tagStatus})`];
+    const actionPrompts = [`▶ Continue (Tags: ${tagStatus})`];
     const actionValues = ["continue"];
 
     if (existingTags.length > 0) {
         actionPrompts.push("＋ Clear, Add a Tag");
         actionValues.push("clear_add");
     }
-    
     actionPrompts.push("＋ Add a Tag", "－ Remove a Tag");
     actionValues.push("add", "remove");
 
     const action = await tp.system.suggester(actionPrompts, actionValues);
-
     if (!action || action === "continue") break;
 
-    if (action === "clear_add") {
-        existingTags = [];
-        // Fall through to the 'add' logic
-    }
+    if (action === "clear_add") existingTags = [];
     
     if (action === "add" || action === "clear_add") {
         const numberedTagsDisplay = tags.map((tag, index) => `${index + 1}. ${tag}`);
@@ -121,69 +200,252 @@ while (true) {
             }
         }
     } else if (action === "remove") {
-        if (existingTags.length === 0) {
-            new Notice("No tags to remove.");
-            continue;
-        }
-        const numberedExistingTags = existingTags.map((tag, index) => `${index + 1}. ${tag}`);
-        const tagToRemove = await tp.system.suggester(numberedExistingTags, existingTags);
-        
-        if (tagToRemove) {
-            existingTags = existingTags.filter(t => t !== tagToRemove);
-        }
+        if (existingTags.length === 0) { new Notice("No tags to remove."); continue; }
+        const tagToRemove = await tp.system.suggester(existingTags, existingTags);
+        if (tagToRemove) existingTags = existingTags.filter(t => t !== tagToRemove);
     }
 }
 
-// 3. REORDER AND SELECT DATE
+// 3. SELECT PRIORITY
+let orderedPriorities = [...priorityLevels];
+if (currentPriorityValue) {
+    const currentIndex = orderedPriorities.findIndex(p => p.dv === currentPriorityValue);
+    if (currentIndex > -1) {
+        orderedPriorities.unshift(orderedPriorities.splice(currentIndex, 1)[0]);
+    }
+} else {
+    // Default to "No Priority" if not set
+    const noPriorityIndex = orderedPriorities.findIndex(p => p.dv === null);
+    if (noPriorityIndex > -1) {
+        orderedPriorities.unshift(orderedPriorities.splice(noPriorityIndex, 1)[0]);
+    }
+}
+
+const selectedPriority = await tp.system.suggester(orderedPriorities.map(p => p.display), orderedPriorities);
+if (!selectedPriority) return "";
+
+// Format Helper
+const formatPriority = (priority) => {
+    if (!priority || !priority.dv) return "";
+    if (USE_DATAVIEW_FORMAT) {
+        return ` [priority:: ${priority.dv}]`;
+    } else {
+        return ` ${priority.emoji}`;
+    }
+};
+const priorityString = formatPriority(selectedPriority);
+
+// 4. SELECT DUE DATE
 const dateFormat = "ddd DD MMM YYYY";
 const suggestions = new Map();
 
-if (moment().day() > 0 && moment().day() < 6) {
-    for (let i = 0; i <= (5 - moment().day()); i++) { suggestions.set(i === 0 ? "Today" : (i === 1 ? "Tomorrow" : moment().add(i, 'days').format('dddd')), moment().add(i, 'days')); }
-    for (let i = 1; i < 6; i++) { suggestions.set(">> " + moment().day(i).format('dddd'), moment().add(1, 'weeks').day(i)); }
-    for (let i = 1; i < 6; i++) { suggestions.set(">>> " + moment().day(i).format('dddd'), moment().add(2, 'weeks').day(i)); }
-} else {
-    for (let i = 1; i < 6; i++) { suggestions.set(">> " + moment().day(i).format('dddd'), moment().add(1, 'weeks').day(i)); }
-    for (let i = 1; i < 6; i++) { suggestions.set(">>> " + moment().day(i).format('dddd'), moment().add(2, 'weeks').day(i)); }
-}
+const addDateSuggestions = () => {
+    const today = moment();
+    // Add next 7 days including today
+    for (let i = 0; i < 7; i++) {
+        const d = today.clone().add(i, 'days');
+        let label = d.format("dddd");
+        if (i === 0) { label = "Today"; }
+        else if (i === 1) { label = "Tomorrow"; }
+        else { label = "> " + label; }
+        
+        suggestions.set(label, d);
+    }
+    // Add next week's days
+    for (let i = 1; i <= 7; i++) {
+       const nextD = today.clone().add(1, 'weeks').day(i); // day(1) is Monday
+       if (nextD.isAfter(today.clone().add(6, 'days'), 'day')) {
+           suggestions.set(">> " + nextD.format("dddd"), nextD);
+       }
+    }
+};
+addDateSuggestions();
 suggestions.set("Manual", "MANUAL_OPTION");
 suggestions.set("No Date", "NO_DATE_OPTION");
 
-let orderedDateSuggestions = [...suggestions];
-if (currentDate && currentDate.isValid()) {
-    const currentIndex = orderedDateSuggestions.findIndex(([key, val]) => val instanceof moment && val.isSame(currentDate, 'day'));
-    if (currentIndex > -1) {
-        orderedDateSuggestions.unshift(orderedDateSuggestions.splice(currentIndex, 1)[0]);
-    } else {
-        orderedDateSuggestions.unshift([`[Current] ${currentDate.format(dateFormat)}`, currentDate]);
-    }
+if (dueDateString) {
+    const parsed = moment(dueDateString, "YYYY-MM-DD");
+    if (parsed.isValid()) suggestions.set(`[Current Due] ${parsed.format(dateFormat)}`, parsed);
 }
-const dateLabels = orderedDateSuggestions.map(([k, v]) => (v instanceof moment) ? `${k} (${v.format("DD MMM YYYY")})` : k);
+
+const orderedDateSuggestions = [...suggestions];
+const dateLabels = orderedDateSuggestions.map(([k, v]) => (v instanceof moment) ? `${k} (${v.format("DD MMM")})` : k);
 const dateValues = orderedDateSuggestions.map(([k, v]) => v);
 
-const selection = await tp.system.suggester(dateLabels, dateValues);
-if (!selection) return "";
+const selectedDate = await tp.system.suggester(dateLabels, dateValues);
+if (!selectedDate) return "";
 
-let dateString = "";
-if (selection instanceof moment) {
-    dateString = ` \uD83D\uDCC5 ${selection.format("YYYY-MM-DD")}`;
-} else if (selection === "MANUAL_OPTION") {
-    const promptDate = (currentDate && currentDate.isValid()) ? currentDate.format("DD MM YY") : moment().format("DD MM YY");
-    const inputDate = await tp.system.prompt("Type a date (DD MM? YY?):", promptDate);
+let finalDueDateMoment = null;
+let dueString = "";
+
+// Format Helper
+const formatDue = (momentObj) => {
+    if (USE_DATAVIEW_FORMAT) {
+        return ` [due:: ${momentObj.format("YYYY-MM-DD")}]`;
+    } else {
+        return ` \uD83D\uDCC5 ${momentObj.format("YYYY-MM-DD")}`;
+    }
+};
+
+if (selectedDate instanceof moment) {
+    finalDueDateMoment = selectedDate;
+    dueString = formatDue(selectedDate);
+} else if (selectedDate === "MANUAL_OPTION") {
+    const promptDate = (dueDateString ? moment(dueDateString, "YYYY-MM-DD") : moment()).format("DD MM YY");
+    const inputDate = await tp.system.prompt("Type a date (DD MM YY):", promptDate);
     if (inputDate) {
         const resultDate = moment(inputDate, "DD MM YY");
         if (resultDate.isValid()) {
-            dateString = ` \uD83D\uDCC5 ${resultDate.format("YYYY-MM-DD")}`;
+            finalDueDateMoment = resultDate;
+            dueString = formatDue(resultDate);
         }
     }
 }
 
-// --- FINAL ASSEMBLY AND CURSOR PLACEMENT ---
+// 5. SELECT ALERT
+let alertString = "";
+// Determine reference date for Alert (Default to Due Date, then Today)
+const baseAlertReference = finalDueDateMoment 
+    ? finalDueDateMoment.clone() 
+    : (alertDateTimeString ? moment(alertDateTimeString.date, "YYYY-MM-DD") : moment());
+
+// Parse config time (Start with static default)
+let [defHour, defMinute] = DEFAULT_ALERT_TIME.split(':').map(Number);
+
+// --- DYNAMIC ALERT LOGIC START ---
+// If due date is today, change default time based on current system time
+if (finalDueDateMoment && finalDueDateMoment.isSame(moment(), 'day')) {
+    const currentHour = moment().hour();
+    let dynamicTime = DEFAULT_ALERT_TIME; // Fallback
+
+    if (currentHour < 8) {
+        // Before 8am -> 09:00
+        dynamicTime = "09:00";
+    } else if (currentHour < 12) {
+        // After 9:00 and less than 12:00 -> 13:00
+        // (Logic extends to cover 8-12 gap)
+        dynamicTime = "13:00";
+    } else if (currentHour < 17) {
+        // Between 12:00 and 17:00 -> 18:00
+        dynamicTime = "18:00";
+    } else if (currentHour < 20) {
+        // Between 17:00 and 20:00 -> 21:00
+        dynamicTime = "21:00";
+    } else {
+        // After 20:00 -> 22:00
+        dynamicTime = "22:00";
+    }
+    
+    // Update the hour/minute used for the default option
+    [defHour, defMinute] = dynamicTime.split(':').map(Number);
+}
+// --- DYNAMIC ALERT LOGIC END ---
+
+const defaultAlertMoment = baseAlertReference.clone().hour(defHour).minute(defMinute);
+
+// Build Alert Options
+let alertOptions = [];
+
+// Option 1: Default (Due Date @ Calculated Time)
+alertOptions.push({ 
+    label: `Default: Due Date @ ${defaultAlertMoment.format("HH:mm")} (${defaultAlertMoment.format("DD MMM")})`, 
+    value: defaultAlertMoment 
+});
+
+// Option 2: No Alert
+alertOptions.push({ label: "No Alert", value: "NONE" });
+
+// Option 3: Existing Alert (if present)
+if (alertDateTimeString) {
+    const existingAlert = moment(`${alertDateTimeString.date} ${alertDateTimeString.time}`, "YYYY-MM-DD HH:mm");
+    if (existingAlert.isValid()) {
+        alertOptions.unshift({ label: `Keep Existing: ${existingAlert.format("DD MMM HH:mm")}`, value: existingAlert });
+    }
+}
+
+// Option 4: Descending list of previous days (up to 14 days back)
+if (finalDueDateMoment) {
+
+	const dueWeekYear = finalDueDateMoment.isoWeekYear();
+	const dueWeek = finalDueDateMoment.isoWeek();
+	
+	for (let i = 1; i <= 14; i++) {
+	
+		const prevDate = finalDueDateMoment.clone().subtract(i, 'days').hour(defHour).minute(defMinute);
+	
+		if (prevDate.isBefore(moment(), 'minute')) continue;
+		const prevWeekYear = prevDate.isoWeekYear();
+		const prevWeek = prevDate.isoWeek();
+		
+		let prefix = "<";
+	
+		if (prevWeekYear < dueWeekYear || (prevWeekYear === dueWeekYear && prevWeek < dueWeek)) {
+			prefix = "<<";
+			
+		}
+		alertOptions.push({	
+			label: `${prefix} ${prevDate.format("dddd DD MMM")} @ ${defaultAlertMoment.format("HH:mm")}`,
+			value: prevDate
+		});
+	}
+}
+
+// Option 5: Custom
+alertOptions.push({ label: "Custom Time...", value: "CUSTOM" });
+
+const selectedAlert = await tp.system.suggester(alertOptions.map(o => o.label), alertOptions.map(o => o.value));
+
+// Alert Format Helper
+const formatAlert = (momentObj) => {
+    if (USE_DATAVIEW_FORMAT) {
+        return ` [alert:: ${momentObj.format("YYYY-MM-DD HH:mm")}]`;
+    } else {
+        return ` ⏰ ${momentObj.format("YYYY-MM-DD HH:mm")}`;
+    }
+};
+
+if (selectedAlert && selectedAlert instanceof moment) {
+    alertString = formatAlert(selectedAlert);
+} else if (selectedAlert === "CUSTOM") {
+    const customInput = await tp.system.prompt("Enter Alert (YYYY-MM-DD HH:mm) or (HH:mm for due date):", defaultAlertMoment.format("YYYY-MM-DD HH:mm"));
+    if (customInput) {
+        let customTime = null;
+        if (customInput.length <= 5 && customInput.includes(":")) {
+             const timeParts = customInput.split(":");
+             const hour = parseInt(timeParts[0]);
+             const minute = parseInt(timeParts[1]);
+             if (!isNaN(hour) && !isNaN(minute)) {
+                 customTime = baseAlertReference.clone().hour(hour).minute(minute);
+             }
+        } else {
+             const customFull = moment(customInput, ["YYYY-MM-DD HH:mm", "DD-MM-YYYY HH:mm"]);
+             if (customFull.isValid()) {
+                 customTime = customFull;
+             }
+        }
+        if (customTime) {
+            alertString = formatAlert(customTime);
+        }
+    }
+}
+
+// --- CREATED DATE INSERTION ---
+const createdMoment = createdDateString ? moment(createdDateString, "YYYY-MM-DD") : moment();
+let createdString = "";
+
+if (USE_DATAVIEW_FORMAT) {
+    createdString = ` [created:: ${createdMoment.format("YYYY-MM-DD")}]`;
+} else {
+    createdString = ` \u2795 ${createdMoment.format("YYYY-MM-DD")}`;
+}
+
+// --- FINAL ASSEMBLY ---
 const prefixPart = `${selectedTask} `;
 const tagPart = existingTags.length > 0 ? `${existingTags.join(' ')} ` : '';
-
 const finalContent = isNewTask ? '' : lineContent.trim();
-const newLine = `${prefixPart}${tagPart}${finalContent}${dateString}`;
+
+// Order: [Tag] [Content] [Alert] [Priority] [Created] [Due]
+const newLine = `${prefixPart}${tagPart}${finalContent}${alertString}${priorityString}${createdString}${dueString}`;
 
 editor.replaceRange(newLine, { line: cursor.line, ch: 0 }, { line: cursor.line, ch: originalLine.length });
 
